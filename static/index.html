@@ -1,0 +1,55 @@
+<!doctype html>
+<html class="no-js" lang="">
+
+<head>
+  <meta charset="utf-8">
+  <title></title>
+  <meta name="description" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="manifest" href="site.webmanifest">
+
+  <link rel="stylesheet" href="css/normalize.css">
+  <link rel="stylesheet" href="css/main.css">
+
+  <meta name="theme-color" content="#fafafa">
+</head>
+
+<body>
+<div class="container">
+  <div style="display: flex; justify-content: space-between">
+    <div style="margin: auto; font-size: 2rem;">
+      <span id="currentValue">--.-</span>°C
+    </div>
+  </div>
+
+  <svg id="plot24h"></svg>
+  <svg id="plot48h"></svg>
+  <svg id="plot1w"></svg>
+</div>
+
+<footer id="footer">
+  <span id="connectingStatus">
+    <strong class="yellow">Łączenie z serwerem</strong>, proszę czekać...
+  </span>
+  <span id="waitingForDataStatus" class="hidden">
+    <strong class="green">Połączono</strong>, oczekiwanie na dane...
+  </span>
+  <span id="updatingStatus" class="hidden">
+    <strong class="green">Połączono</strong>,
+    <span>
+      ostatnia aktualizacja:
+      <span id="lastUpdated"></span>
+    </span>
+  </span>
+  <span id="reconnectingStatus" class="hidden">
+    <strong class="orange">Rozłączono</strong>, łączenie...
+  </span>
+</footer>
+
+<script src="js/vendor/d3.min.js"></script>
+<script src="js/library.js"></script>
+<script src="js/main.js"></script>
+</body>
+
+</html>
