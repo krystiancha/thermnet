@@ -12,12 +12,12 @@ const Status = Object.freeze({
 
 const width = 300;
 const height = 145;
-const margin = {top: 20, right: 10, bottom: 30, left: 30};
+const margin = {top: 20, right: 15, bottom: 30, left: 30};
 
 
 // Global objects
 
-const plot24h = createPlot(d3.select("#plot24h").attr("viewBox", [0, 0, width, height]), "24 h");
+const plot24h = createPlot(d3.select("#plot24h").attr("viewBox", [0, 0, width, height]), "24 h", true);
 const plot48h = createPlot(d3.select("#plot48h").attr("viewBox", [0, 0, width, height]), "48 h");
 const plot1w = createPlot(d3.select("#plot1w").attr("viewBox", [0, 0, width, height]), "tydzień");
 
@@ -78,7 +78,7 @@ function connectSocket(url) {
   };
 }
 
-function createPlot(svg, title) {
+function createPlot(svg, title, minmax=false) {
   svg.append("text")
     .attr("x", width / 2)
     .attr("y", margin.top / 2)
@@ -86,18 +86,45 @@ function createPlot(svg, title) {
     .attr("font-size", "0.5em")
     .attr("fill", "#657b83")
     .text(title)
-  return {
+
+  const plot = {
     x: d3.scaleTime().range([margin.left, width - margin.right]),
     y: d3.scaleLinear().range([height - margin.bottom, margin.top]),
     xAxis: svg.append("g").attr("transform", `translate(0,${height - margin.bottom})`),
     yAxis: svg.append("g").attr("transform", `translate(${margin.left}, 0)`),
     line: svg.append("path")
       .attr("fill", "none")
-      .attr("stroke", "#268bd2")
+      .attr("stroke", "#6c71c4")
       .attr("stroke-width", 1.5)
       .attr("stroke-linejoin", "round")
       .attr("stroke-linecap", "round"),
   }
+
+  if (minmax) {
+    plot.minLine = svg.append("line")
+      .attr("fill", "none")
+      .attr("stroke", "#268bd2")
+      .attr("stroke-width", 0.5);
+
+    plot.minText = svg.append("text")
+    .attr("text-anchor", "end")
+    .attr("dy", -2)
+    .attr("font-size", "0.5em")
+    .attr("fill", "#657b83")
+
+    plot.maxLine = svg.append("line")
+      .attr("fill", "none")
+      .attr("stroke", "#cb4b16")
+      .attr("stroke-width", 0.5);
+
+    plot.maxText = svg.append("text")
+    .attr("text-anchor", "end")
+    .attr("dy", -2)
+    .attr("font-size", "0.5em")
+    .attr("fill", "#657b83")
+  }
+
+  return plot
 }
 
 function updatePlot(plot, timeFormat, data) {
@@ -130,6 +157,32 @@ function updatePlot(plot, timeFormat, data) {
         .y(d => {
           return plot.y(d.data);
         }));
+
+    if ("minLine" in plot && "minText" in plot && "maxLine" in plot && "maxText" in plot) {
+      const yMin = Math.min(...data.map(x => x.data));
+      plot.minLine
+        .attr("x1", margin.left)
+        .attr("x2", width)
+        .attr("y1", plot.y(yMin))
+        .attr("y2", plot.y(yMin));
+
+      plot.minText
+        .attr("x", width)
+        .attr("y", plot.y(yMin))
+        .text(yMin.toFixed(1));
+
+      const yMax = Math.max(...data.map(x => x.data));
+      plot.maxLine
+        .attr("x1", margin.left)
+        .attr("x2", width)
+        .attr("y1", plot.y(yMax))
+        .attr("y2", plot.y(yMax));
+
+      plot.maxText
+        .attr("x", width)
+        .attr("y", plot.y(yMax))
+        .text(yMax.toFixed(1));
+    }
 }
 
 function setStatusBar(status) {
