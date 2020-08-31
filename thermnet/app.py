@@ -31,28 +31,46 @@ def last(df: pd.DataFrame, period, resolution):
 
 @routes.post("/measurements/")
 async def measurements(request: web.Request):
-    shared_secret = request.app["shared_secret"]
-
     data = await request.json()
 
-    if not data or "key" not in data or "data" not in data or "time" not in data:
+    try:
+        secret = data["secret"]
+    except KeyError:
         raise web.HTTPBadRequest()
 
-    if data["key"] != shared_secret:
-        raise web.HTTPUnauthorized()
+    with request.app["sql_engine"].connect() as conn:
+        try:
+            sensor_id = next(conn.execute(text("SELECT id FROM sensors WHERE secret = :secret"), secret=secret))[0]
+        except StopIteration:
+          raise web.HTTPUnauthorized()
 
-    time = datetime.utcfromtimestamp((await request.json())["time"])
-    temp = data["data"]
+    time = datetime.utcnow()
+
+    try:
+        temperature = data["temperature"]
+        pressure = data["pressure"]
+        humidity = data["humidity"]
+    except KeyError:
+        raise web.HTTPBadRequest()
 
     async with request.app["events_lock"]:
-        request.app["current_temp"] = temp
+        request.app["current_temp"] = temperature
         for event in request.app["events"]:
             event.set()
 
-    s = text("INSERT INTO measurements (time, value) VALUES (:time, :temp)")
     with request.app["sql_engine"].connect() as conn:
         conn.execute(
-            s, time=time, temp=temp,
+            text("""
+                INSERT INTO measurements (time, value, sensor, quantity) VALUES
+                (:time, :temperature, :sensor, 1),
+                (:time, :pressure, :sensor, 2),
+                (:time, :humidity, :sensor, 3)
+            """),
+            time=time,
+            sensor=sensor_id,
+            temperature=temperature,
+            pressure=pressure,
+            humidity=humidity,
         )
 
     return web.Response(status=200)
