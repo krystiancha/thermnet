@@ -17,9 +17,9 @@ const margin = {top: 20, right: 15, bottom: 30, left: 30};
 
 // Global objects
 
-const plot24h = createPlot(d3.select("#plot24h").attr("viewBox", [0, 0, width, height]), "24 h", true);
-const plot48h = createPlot(d3.select("#plot48h").attr("viewBox", [0, 0, width, height]), "48 h");
-const plot1w = createPlot(d3.select("#plot1w").attr("viewBox", [0, 0, width, height]), "tydzień");
+// const plot24h = createPlot(d3.select("#plot24h").attr("viewBox", [0, 0, width, height]), "24 h", true);
+// const plot48h = createPlot(d3.select("#plot48h").attr("viewBox", [0, 0, width, height]), "48 h");
+// const plot1w = createPlot(d3.select("#plot1w").attr("viewBox", [0, 0, width, height]), "tydzień");
 
 
 // Main
@@ -45,26 +45,25 @@ function connectSocket(url) {
     const rawData = JSON.parse(event.data);
     console.log("Data parsed:", rawData);
 
-    if (rawData.type === "last") {
-      document.getElementById("currentValue").innerHTML = rawData.data.toFixed(1);
-      console.log("Updated current temperature");
-      return;
-    }
+    document.querySelector("#temperature #value").innerHTML = rawData.temperature.toFixed(1);
+    document.querySelector("#humidity #value").innerHTML = rawData.humidity.toFixed(1);
+    document.querySelector("#pressure #value").innerHTML = rawData.pressure.toFixed(1);
+    console.log("Updated current temperature");
 
     setStatusBar(Status.UPDATING);
 
-    const data = rawData.data.data.map((value, index) => ({index: rawData.data.index[index], data: value}));
+    // const data = rawData.data.data.map((value, index) => ({index: rawData.data.index[index], data: value}));
 
-    if (rawData.type === "24h") {
-      updatePlot(plot24h, "%H:%M", data);
-      console.log("Updated 24h plot");
-    } else if (rawData.type === "48h") {
-      updatePlot(plot48h, "%H:%M", data);
-      console.log("Updated 48h plot");
-    } else if (rawData.type === "1w") {
-      updatePlot(plot1w, "%a", data);
-      console.log("Updated 1w plot");
-    }
+    // if (rawData.type === "24h") {
+    //   updatePlot(plot24h, "%H:%M", data);
+    //   console.log("Updated 24h plot");
+    // } else if (rawData.type === "48h") {
+    //   updatePlot(plot48h, "%H:%M", data);
+    //   console.log("Updated 48h plot");
+    // } else if (rawData.type === "1w") {
+    //   updatePlot(plot1w, "%a", data);
+    //   console.log("Updated 1w plot");
+    // }
   }
 
   webSocket.onclose = event => {

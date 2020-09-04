@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title></title>
+  <title>Thermnet</title>
   <meta name="description" content="">
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
@@ -17,15 +17,23 @@
 
 <body>
 <div class="container">
-  <div style="display: flex; justify-content: space-between">
-    <div style="margin: auto; font-size: 2rem;">
-      <span id="currentValue">--.-</span>°C
+  <div style="text-align: center; font-size: 2rem; font-family: monospace;">
+    <div id="temperature">
+      <span id="value">--.-</span> °C
+    </div>
+    <div id="humidity">
+      <span id="value">--</span> %
+    </div>
+    <div id="pressure">
+      <span id="value">--.-</span> hPa
     </div>
   </div>
 
+  <!--
   <svg id="plot24h"></svg>
   <svg id="plot48h"></svg>
   <svg id="plot1w"></svg>
+  -->
 </div>
 
 <footer id="footer">

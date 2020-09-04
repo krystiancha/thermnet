@@ -1,11 +1,8 @@
 import asyncio
-from argparse import ArgumentParser
-from datetime import datetime, timedelta
-from os import environ
+from datetime import datetime
+from json.decoder import JSONDecodeError
 
-import pandas as pd
-import pytz
-from aiohttp import WSMsgType, web
+from aiohttp import web
 from sqlalchemy import create_engine
 from sqlalchemy.sql import text
 
@@ -16,62 +13,73 @@ async def create_sqlalchemy(app):
     app["sql_engine"] = create_engine("postgresql://thermnet@localhost/thermnet")
 
 
+async def get_first_current(app):
+    with app["sql_engine"].connect() as conn:
+        for id, name in {1: "temperature", 2: "pressure", 3: "humidity"}.items():
+            result = conn.execute(
+                text(
+                    """
+                    SELECT value FROM measurements
+                    WHERE quantity = :id ORDER BY time DESC LIMIT 1;
+                """
+                ),
+                id=id,
+            )
+            async with app["current_cond"]:
+                try:
+                    app["current"][name] = float(next(result)[0])
+                except StopIteration:
+                    pass
+
+
 async def dispose_sqlalchemy(app):
     app["sql_engine"].dispose()
 
 
-def last(df: pd.DataFrame, period, resolution):
-    return (
-        df[df.index > datetime.now(pytz.utc) - period]
-        .resample(resolution)
-        .mean()
-        .interpolate()
-    )
-
-
 @routes.post("/measurements/")
 async def measurements(request: web.Request):
-    data = await request.json()
+    try:
+        data = await request.json()
+    except JSONDecodeError as e:
+        raise web.HTTPBadRequest(reason=f"JSON decode error: {e}")
 
     try:
-        secret = data["secret"]
-    except KeyError:
-        raise web.HTTPBadRequest()
-
-    with request.app["sql_engine"].connect() as conn:
-        try:
-            sensor_id = next(conn.execute(text("SELECT id FROM sensors WHERE secret = :secret"), secret=secret))[0]
-        except StopIteration:
-          raise web.HTTPUnauthorized()
-
-    time = datetime.utcnow()
+        with request.app["sql_engine"].connect() as conn:
+            sensor_result = conn.execute(
+                text("SELECT id FROM sensors WHERE secret = :secret"),
+                secret=data["secret"],
+            )
+            sensor_id = next(sensor_result)[0]
+    except KeyError as e:
+        raise web.HTTPBadRequest(reason=f"Key error: {e}")
+    except StopIteration:
+        raise web.HTTPUnauthorized()
 
     try:
-        temperature = data["temperature"]
-        pressure = data["pressure"]
-        humidity = data["humidity"]
-    except KeyError:
-        raise web.HTTPBadRequest()
+        with request.app["sql_engine"].connect() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO measurements (time, value, sensor, quantity) VALUES
+                    (:time, :temperature, :sensor, 1),
+                    (:time, :pressure, :sensor, 2),
+                    (:time, :humidity, :sensor, 3)
+                """
+                ),
+                time=datetime.utcnow(),
+                sensor=sensor_id,
+                temperature=data["temperature"],
+                pressure=data["pressure"],
+                humidity=data["humidity"],
+            )
+        async with request.app["current_cond"]:
+            request.app["current"] = {
+                x: float(data[x]) for x in ["temperature", "pressure", "humidity"]
+            }
+            request.app["current_cond"].notify_all()
 
-    async with request.app["events_lock"]:
-        request.app["current_temp"] = temperature
-        for event in request.app["events"]:
-            event.set()
-
-    with request.app["sql_engine"].connect() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO measurements (time, value, sensor, quantity) VALUES
-                (:time, :temperature, :sensor, 1),
-                (:time, :pressure, :sensor, 2),
-                (:time, :humidity, :sensor, 3)
-            """),
-            time=time,
-            sensor=sensor_id,
-            temperature=temperature,
-            pressure=pressure,
-            humidity=humidity,
-        )
+    except KeyError as e:
+        raise web.HTTPBadRequest(reason=f"Key error: {e}")
 
     return web.Response(status=200)
 
@@ -81,75 +89,29 @@ async def websocket_handler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    temp = request.app["current_temp"]
-    if temp is not None:
-        await ws.send_json({"type": "last", "data": temp})
+    async with request.app["current_cond"]:
+        current = request.app["current"]
 
-    s = text("""SELECT date_trunc('minute', time) AS time, avg(value) as value
-        FROM measurements WHERE time > :nt GROUP BY 1""")
-    with request.app["sql_engine"].connect() as conn:
-        data = conn.execute(s, nt=datetime.now(pytz.utc) - timedelta(days=2)).fetchall()
-
-    if temp is None:
-        await ws.send_json({"type": "last", "data": data[-1][1]})
-
-    df = pd.DataFrame(data, columns=["time", "temperature"])
-    df = df.set_index("time")
-    df = df["temperature"]
-
-    await ws.send_str(
-        '{"type": "24h", "data": '
-        + last(df, timedelta(days=1), "5min").to_json(orient="split")
-        + "}"
-    )
-
-    await ws.send_str(
-        '{"type": "48h", "data": '
-        + last(df, timedelta(days=2), "10min").to_json(orient="split")
-        + "}"
-    )
-
-    s = text("""SELECT date_trunc('hour', time) AS time, avg(value) as value
-        FROM measurements WHERE time > :nt GROUP BY 1""")
-    with request.app["sql_engine"].connect() as conn:
-        data = conn.execute(s, nt=datetime.now(pytz.utc) - timedelta(weeks=1)).fetchall()
-
-    df = pd.DataFrame(data, columns=["time", "temperature"])
-    df = df.set_index("time")
-    df = df["temperature"]
-
-    await ws.send_str(
-        '{"type": "1w", "data": '
-        + df.to_json(orient="split")
-        + "}"
-    )
-
-    event = asyncio.Event()
-    async with request.app["events_lock"]:
-        request.app["events"].append(event)
     try:
         while True:
-            await event.wait()
-            async with request.app["events_lock"]:
-                temp = request.app["current_temp"]
-            await ws.send_json({"type": "last", "data": temp})
-            event.clear()
+            await ws.send_json(current)
+            async with request.app["current_cond"]:
+                await request.app["current_cond"].wait()
+                current = request.app["current"]
     finally:
-        request.app["events"].remove(event)
         await ws.close()
         return ws
 
 
-async def app(argv=None):
+async def app(args=None):
     application = web.Application()
 
-    application["shared_secret"] = environ["KEY"]
-    application["current_temp"] = None
-    application["events"] = []
-    application["events_lock"] = asyncio.Lock()
+    application["current"] = {}
+    application["current_cond"] = asyncio.Condition()
 
     application.add_routes(routes)
     application.on_startup.append(create_sqlalchemy)
+    application.on_startup.append(get_first_current)
     application.on_cleanup.append(dispose_sqlalchemy)
 
     return application
