@@ -18,22 +18,20 @@
 <body>
 <div class="container">
   <div style="text-align: center; font-size: 2rem; font-family: monospace;">
-    <div id="temperature">
-      <span id="value">--.-</span> °C
+    <div id="temperature" class="red">
+      <span id="temperatureValue">--.-</span> °C
     </div>
-    <div id="humidity">
-      <span id="value">--</span> %
+    <div id="humidity" class="green">
+      <span id="humidityValue">--.-</span> %
     </div>
-    <div id="pressure">
-      <span id="value">--.-</span> hPa
+    <div id="pressure" class="blue">
+      <span id="pressureValue">--.-</span> hPa
     </div>
   </div>
 
-  <!--
-  <svg id="plot24h"></svg>
-  <svg id="plot48h"></svg>
-  <svg id="plot1w"></svg>
-  -->
+  <svg id="plotTemperature"></svg>
+  <svg id="plotHumidity"></svg>
+  <svg id="plotPressure"></svg>
 </div>
 
 <footer id="footer">

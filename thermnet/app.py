@@ -1,5 +1,9 @@
+import argparse
 import asyncio
+import logging
+import os
 from datetime import datetime
+from itertools import groupby
 from json.decoder import JSONDecodeError
 
 from aiohttp import web
@@ -9,27 +13,48 @@ from sqlalchemy.sql import text
 routes = web.RouteTableDef()
 
 
-async def create_sqlalchemy(app):
-    app["sql_engine"] = create_engine("postgresql://thermnet@localhost/thermnet")
-
-
-async def get_first_current(app):
+async def get_payload(app):
     with app["sql_engine"].connect() as conn:
-        for id, name in {1: "temperature", 2: "pressure", 3: "humidity"}.items():
-            result = conn.execute(
-                text(
-                    """
-                    SELECT value FROM measurements
-                    WHERE quantity = :id ORDER BY time DESC LIMIT 1;
-                """
-                ),
-                id=id,
+        quantities = {
+            id: {"name": name, "unit": unit}
+            for id, name, unit in conn.execute(
+                text("""SELECT id, name, unit FROM quantities""")
             )
-            async with app["current_cond"]:
-                try:
-                    app["current"][name] = float(next(result)[0])
-                except StopIteration:
-                    pass
+        }
+        measurements = conn.execute(
+            text(
+                """
+                SELECT id, time, value, sensor, quantity FROM measurements
+                WHERE time BETWEEN NOW() - INTERVAL '24 HOURS' AND NOW()
+                ORDER BY time
+                """
+            )
+        )
+
+        def q_key(x):
+            return x[4]
+
+        return [
+            {
+                "name": quantities[quantity]["name"],
+                "unit": quantities[quantity]["unit"],
+                "measurements": [
+                    {"index": int(round(x[1].timestamp())), "value": x[2]}
+                    for x in measurements
+                ],
+            }
+            for quantity, measurements in groupby(
+                sorted(measurements, key=q_key), key=q_key
+            )
+        ]
+
+
+async def create_sqlalchemy(app):
+    app["sql_engine"] = create_engine(app["db_url"])
+
+
+async def init_payload(app):
+    app["current_cond"] = asyncio.Condition()
 
 
 async def dispose_sqlalchemy(app):
@@ -73,9 +98,6 @@ async def measurements(request: web.Request):
                 humidity=data["humidity"],
             )
         async with request.app["current_cond"]:
-            request.app["current"] = {
-                x: float(data[x]) for x in ["temperature", "pressure", "humidity"]
-            }
             request.app["current_cond"].notify_all()
 
     except KeyError as e:
@@ -89,34 +111,49 @@ async def websocket_handler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    async with request.app["current_cond"]:
-        current = request.app["current"]
-
     try:
         while True:
-            await ws.send_json(current)
+            payload = await get_payload(request.app)
+
+            await ws.send_json(payload)
             async with request.app["current_cond"]:
                 await request.app["current_cond"].wait()
-                current = request.app["current"]
     finally:
         await ws.close()
         return ws
 
 
-async def app(args=None):
+async def app():
     application = web.Application()
 
-    application["current"] = {}
-    application["current_cond"] = asyncio.Condition()
+    application["db_url"] = os.environ.get(
+        "DB_URL", "postgresql://thermnet@localhost/thermnet"
+    )
 
     application.add_routes(routes)
     application.on_startup.append(create_sqlalchemy)
-    application.on_startup.append(get_first_current)
+    application.on_startup.append(init_payload)
     application.on_cleanup.append(dispose_sqlalchemy)
 
     return application
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--host")
+parser.add_argument("--port", default=8081, type=int)
+
 if __name__ == "__main__":
+    args = parser.parse_args()
+    logging.basicConfig(
+        format="%(levelname)s:%(message)s",
+        level=os.environ.get("LOG_LEVEL"),
+    )
+
     application = app()
-    web.run_app(application, reuse_address=True, reuse_port=True)
+    web.run_app(
+        application,
+        host=args.host,
+        port=args.port,
+        reuse_address=True,
+        reuse_port=True,
+    )

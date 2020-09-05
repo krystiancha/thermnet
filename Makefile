@@ -8,7 +8,7 @@ black:
 	black thermnet
 
 isort:
-	isort --recursive thermnet
+	isort thermnet
 
 flake8:
 	flake8 thermnet
