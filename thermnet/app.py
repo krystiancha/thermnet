@@ -25,11 +25,13 @@ async def get_payload(app):
             text(
                 """
                 SELECT id, time, value, sensor, quantity FROM measurements
-                WHERE time BETWEEN NOW() - INTERVAL '24 HOURS' AND NOW()
+                WHERE sensor = 0 AND time BETWEEN NOW() - INTERVAL '24 HOURS' AND NOW()
                 ORDER BY time
                 """
             )
         )
+
+        app["logger"].info(f"Fetched payload")
 
         def q_key(x):
             return x[4]
@@ -68,6 +70,8 @@ async def measurements(request: web.Request):
     except JSONDecodeError as e:
         raise web.HTTPBadRequest(reason=f"JSON decode error: {e}")
 
+    request.app["logger"].info(f"Got request: {data}")
+
     try:
         with request.app["sql_engine"].connect() as conn:
             sensor_result = conn.execute(
@@ -79,6 +83,8 @@ async def measurements(request: web.Request):
         raise web.HTTPBadRequest(reason=f"Key error: {e}")
     except StopIteration:
         raise web.HTTPUnauthorized()
+
+    request.app["logger"].info(f"Selected sensor: {sensor_id}")
 
     try:
         with request.app["sql_engine"].connect() as conn:
@@ -113,7 +119,11 @@ async def websocket_handler(request):
 
     try:
         while True:
-            payload = await get_payload(request.app)
+            try:
+                payload = await get_payload(request.app)
+            except Exception as e:
+                request.app["logger"].warning(f"Error while fetching payload: {e}")
+                continue
 
             await ws.send_json(payload)
             async with request.app["current_cond"]:
@@ -124,7 +134,13 @@ async def websocket_handler(request):
 
 
 async def app():
+    logging.basicConfig(
+        format="%(levelname)s:%(message)s",
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+    )
+
     application = web.Application()
+    application["logger"] = logging.getLogger(__name__)
 
     application["db_url"] = os.environ.get(
         "DB_URL", "postgresql://thermnet@localhost/thermnet"
@@ -144,14 +160,9 @@ parser.add_argument("--port", default=8081, type=int)
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    logging.basicConfig(
-        format="%(levelname)s:%(message)s",
-        level=os.environ.get("LOG_LEVEL"),
-    )
 
-    application = app()
     web.run_app(
-        application,
+        app(),
         host=args.host,
         port=args.port,
         reuse_address=True,
