@@ -114,7 +114,7 @@ void loop() {
     }
   }
 
-  delay(1 * 1000);
+  delay(60 * 1000);
 }
 
 void initSensor() {
