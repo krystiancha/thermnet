@@ -71,7 +71,7 @@ def main(args=None):
             logging.error(f"Bus {sensor.bus} not found")
             sys.exit(1)
 
-        bme = thermnet.bme280.Adafruit_BME280_I2C(i2c)
+        bme = thermnet.bme280.Adafruit_BME280_I2C(i2c, sensor.address)
 
         t, p, h = (bme.temperature, bme.pressure, bme.humidity)
         logging.info(f"Got {t}, {p}, {h}")
