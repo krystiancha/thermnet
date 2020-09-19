@@ -1,7 +1,7 @@
 import argparse
 import asyncio
+import configparser
 import logging
-import os
 from datetime import datetime
 from itertools import groupby
 from json.decoder import JSONDecodeError
@@ -10,7 +10,22 @@ from aiohttp import web
 from sqlalchemy import create_engine
 from sqlalchemy.sql import text
 
+from thermnet.logging import setup_logging
+
 routes = web.RouteTableDef()
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--config", default="/etc/thermnet/thermnet.ini")
+parser.add_argument("--host", default="localhost")
+parser.add_argument("--port", default=8081, type=int)
+
+config = configparser.ConfigParser()
+config.read_dict(
+    {
+        "db": {"url": "postgresql://thermnet@localhost/thermnet"},
+        "logging": {"level": "INFO"},
+    }
+)
 
 
 async def get_payload(app):
@@ -31,7 +46,7 @@ async def get_payload(app):
             )
         )
 
-        app["logger"].info(f"Fetched payload")
+        app["logger"].info("Fetched payload")
 
         def q_key(x):
             return x[4]
@@ -70,7 +85,7 @@ async def measurements(request: web.Request):
     except JSONDecodeError as e:
         raise web.HTTPBadRequest(reason=f"JSON decode error: {e}")
 
-    request.app["logger"].info(f"Got request: {data}")
+    logging.info(f"Got request: {data}")
 
     try:
         with request.app["sql_engine"].connect() as conn:
@@ -84,7 +99,7 @@ async def measurements(request: web.Request):
     except StopIteration:
         raise web.HTTPUnauthorized()
 
-    request.app["logger"].info(f"Selected sensor: {sensor_id}")
+    logging.info(f"Selected sensor: {sensor_id}")
 
     try:
         with request.app["sql_engine"].connect() as conn:
@@ -122,7 +137,7 @@ async def websocket_handler(request):
             try:
                 payload = await get_payload(request.app)
             except Exception as e:
-                request.app["logger"].warning(f"Error while fetching payload: {e}")
+                logging.warning(f"Error while fetching payload: {e}")
                 continue
 
             await ws.send_json(payload)
@@ -134,17 +149,12 @@ async def websocket_handler(request):
 
 
 async def app():
-    logging.basicConfig(
-        format="%(levelname)s:%(message)s",
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-    )
+    config.read(args.config)
+    setup_logging(config["logging"]["level"])
 
     application = web.Application()
-    application["logger"] = logging.getLogger(__name__)
 
-    application["db_url"] = os.environ.get(
-        "DB_URL", "postgresql://thermnet@localhost/thermnet"
-    )
+    application["db_url"] = config["db"]["url"]
 
     application.add_routes(routes)
     application.on_startup.append(create_sqlalchemy)
@@ -153,10 +163,6 @@ async def app():
 
     return application
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--host")
-parser.add_argument("--port", default=8081, type=int)
 
 if __name__ == "__main__":
     args = parser.parse_args()

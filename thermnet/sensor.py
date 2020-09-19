@@ -8,6 +8,7 @@ import smbus
 import sqlalchemy as sa
 
 import thermnet.bme280
+from thermnet.logging import setup_logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="/etc/thermnet/thermnet.ini")
@@ -20,15 +21,6 @@ config.read_dict(
         "logging": {"level": "INFO"},
     }
 )
-
-
-def setup_logging(level: str):
-    FORMAT = "%(levelname)s: %(message)s"
-    try:
-        logging.basicConfig(format=FORMAT, level=level)
-    except ValueError as e:
-        logging.basicConfig(format=FORMAT, level="INFO")
-        logging.warning(e)
 
 
 def main(args=None):
