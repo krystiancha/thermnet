@@ -84,7 +84,7 @@ def main(args=None):
             continue
 
         t, p, h = (bme.temperature, bme.pressure, bme.humidity)
-        logging.info(f"Got data from sensor: {t} °C, {p} hPa, {h}%")
+        logging.info(f"Got data from sensor: {t:.2f} °C, {p:.2f} hPa, {h:.2f}%")
 
         if args.check:
             continue
