@@ -148,8 +148,8 @@ async def websocket_handler(request):
         return ws
 
 
-async def app():
-    config.read(args.config)
+async def app(config_path="/etc/thermnet/thermnet.ini"):
+    config.read(config)
     setup_logging(config["logging"]["level"])
 
     application = web.Application()
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     web.run_app(
-        app(),
+        app(args.config),
         host=args.host,
         port=args.port,
         reuse_address=True,
