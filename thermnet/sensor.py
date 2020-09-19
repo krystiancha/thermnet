@@ -1,85 +1,91 @@
-import thermnet.bme280
+import argparse
+import configparser
+import logging
+import re
+from datetime import datetime
+
 import smbus
 import sqlalchemy as sa
-from datetime import datetime
-import os
-import logging
-from dataclasses import dataclass
-import sys
-import argparse
 
+import thermnet.bme280
 
-@dataclass
-class Sensor:
-    HELP = "The format is: \"id1 bus1 address1,id2 bus2 address2,...\""
-    id: int
-    bus: int
-    address: hex
-
-    @classmethod
-    def from_str(cls, s: str):
-        spl = s.split()
-        if len(spl) != 3:
-            raise ValueError(f"Bad format: {s}")
-        raw_id, raw_bus, raw_address = spl
-        try:
-            id = int(raw_id)
-        except ValueError:
-            raise ValueError(f"Bad id: {raw_id}")
-        try:
-            bus = int(raw_bus)
-        except ValueError:
-            raise ValueError(f"Bad bus: {raw_bus}")
-        try:
-            address = int(raw_address, 0)
-        except (ValueError, TypeError):
-            raise ValueError(f"Bad address: {raw_address}")
-        
-        return Sensor(id, bus, address)
-    
-    
 parser = argparse.ArgumentParser()
+parser.add_argument("--config", default="/etc/thermnet/thermnet.ini")
 parser.add_argument("--check", action="store_true")
+
+config = configparser.ConfigParser()
+config.read_dict(
+    {
+        "db": {"url": "postgresql://thermnet@localhost/thermnet"},
+        "logging": {"level": "INFO"},
+    }
+)
+
+
+def setup_logging(level: str):
+    FORMAT = "%(levelname)s: %(message)s"
+    try:
+        logging.basicConfig(format=FORMAT, level=level)
+    except ValueError as e:
+        logging.basicConfig(format=FORMAT, level="INFO")
+        logging.warning(e)
 
 
 def main(args=None):
-    logging.basicConfig(
-        format="%(levelname)s:%(message)s",
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-    )
-
     args = parser.parse_args(args)
-    
-    DB_URL = os.environ.get("DB_URL", "postgresql://thermnet@localhost/thermnet")
-    logging.info(f"Database URL: {DB_URL}")
+    config.read(args.config)
 
-    try:
-        SENSORS = map(
-            lambda x: Sensor.from_str(x),
-            os.environ.get("SENSORS", "0 1 0x76").split(","),
-        )
-    except ValueError as e:
-        logging.error(f"Bad SENSORS config: {e}; {Sensor.HELP}")
-        sys.exit(1)
+    setup_logging(config["logging"]["level"])
 
-    for sensor in SENSORS:
-        logging.info(f"Reading sensor: {sensor}")
+    if args.check and logging.getLogger().getEffectiveLevel() > logging.INFO:
+        logging.warning("--check was specified, overriding log level to INFO")
+        logging.getLogger().setLevel(logging.INFO)
+
+    for section, kv in config.items():
+        m = re.match("sensor-(.+)", section)
+        if not m:
+            continue
+        try:
+            sensor_id = int(m.group(1))
+        except ValueError:
+            logging.error(f"Invalid sensor ID: {m.group(1)}, skipping")
+            continue
 
         try:
-            i2c = smbus.SMBus(sensor.bus)
-        except FileNotFoundError:
-            logging.error(f"Bus {sensor.bus} not found")
-            sys.exit(1)
+            bus = int(kv["bus"])
+        except KeyError:
+            logging.error(f"'bus' key not found in section {section}, skipping")
+            continue
+        except ValueError:
+            logging.error(f"Invalid sensor bus: {kv['bus']}, skipping")
+            continue
 
-        bme = thermnet.bme280.Adafruit_BME280_I2C(i2c, sensor.address)
+        try:
+            address = int(kv["address"], 0)
+        except KeyError:
+            logging.error(f"'address' key not found in section {section}, skipping")
+            continue
+        except ValueError:
+            logging.error(f"Invalid sensor address: {kv['address']}, skipping")
+            continue
+
+        logging.info(f"Found sensor {sensor_id} config: {hex(address)} @ bus {bus}")
+
+        try:
+            i2c = smbus.SMBus(bus)
+        except FileNotFoundError:
+            logging.error(f"Bus {bus} not found, skipping")
+            continue
+
+        bme = thermnet.bme280.Adafruit_BME280_I2C(i2c, address)
 
         t, p, h = (bme.temperature, bme.pressure, bme.humidity)
-        logging.info(f"Got {t}, {p}, {h}")
+        logging.info(f"Got data from sensor: {t} °C, {p} hPa, {h}%")
 
         if args.check:
             continue
 
-        with sa.create_engine(DB_URL).connect() as conn:
+        with sa.create_engine(config["db"]["url"]).connect() as conn:
             conn.execute(
                 sa.text(
                     """
@@ -90,13 +96,13 @@ def main(args=None):
                 """
                 ),
                 time=datetime.utcnow(),
-                sensor=sensor.id,
-                temperature=bme.temperature,
-                pressure=bme.pressure,
-                humidity=bme.humidity,
+                sensor=sensor_id,
+                temperature=t,
+                pressure=p,
+                humidity=h,
             )
             logging.info("Committed to database")
-            
+
 
 if __name__ == "__main__":
     main()
