@@ -77,7 +77,11 @@ def main(args=None):
             logging.error(f"Bus {bus} not found, skipping")
             continue
 
-        bme = thermnet.bme280.Adafruit_BME280_I2C(i2c, address)
+        try:
+            bme = thermnet.bme280.Adafruit_BME280_I2C(i2c, address)
+        except OSError as e:
+            logging.error(f"{e}, please check sensor address: {address}, skipping")
+            continue
 
         t, p, h = (bme.temperature, bme.pressure, bme.humidity)
         logging.info(f"Got data from sensor: {t} °C, {p} hPa, {h}%")
